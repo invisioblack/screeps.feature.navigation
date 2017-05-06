@@ -1,10 +1,10 @@
 
-const COST_MATRIX_VALIDITY = 10010;
-
 let mod = {};
 module.exports = mod;
 
 mod.extend = function(){
+    const COST_MATRIX_VALIDITY = context.settings.COST_MATRIX_VALIDITY;
+
     Object.defineProperties(Room.prototype, {
         'costMatrix': {
             configurable: true,
@@ -39,7 +39,7 @@ mod.extend = function(){
                 data[this.name] = costMatrix.serialize();
                 data[`${this.name}_time`] = Game.time + COST_MATRIX_VALIDITY;
                 partition.data = data;
-                
+
                 return costMatrix;
             }
         },

@@ -1,11 +1,11 @@
 
-// define rooms to ignore 
-const BLOCKED_ROOMS = [];
-const ROOMPATH_VALILDITY = 5020;
-const TRAVELPATH_VALILDITY = 40010;
-
 let mod = {};
 module.exports = mod;
+
+// copy locally to have at hand during later calls (from different context)
+const ROOMPATH_VALILDITY = context.settings.ROOMPATH_VALILDITY;
+const TRAVELPATH_VALILDITY = context.settings.TRAVELPATH_VALILDITY;
+const BLOCKED_ROOMS = context.settings.BLOCKED_ROOMS;
 
 // For use with PathFinder Results
 function serializePath(result, fromPos, toPos, trimEnd = false){
@@ -25,7 +25,7 @@ function serializePath(result, fromPos, toPos, trimEnd = false){
     }
 
     return path;
-};
+}
 
 function findRoute(fromRoomName, toRoomName, checkOwner = true, preferHighway = true){
     if (fromRoomName === toRoomName)  return [];
@@ -50,7 +50,7 @@ function findRoute(fromRoomName, toRoomName, checkOwner = true, preferHighway = 
             return Infinity;
         }
     });
-};
+}
 
 function findLocalPath(from, to, ignoreCreeps = true, maxRooms = null){
     let path = from.findPathTo(to, {
@@ -102,14 +102,18 @@ function findGlobalPath(from, to){
     return serializePath(ret, from, to, true);
 }
 
+function posToString(pos){
+    return `${pos.roomName}x${pos.x}y${pos.y}`;
+}
+
 mod.find = function(from, to, ignoreCreeps = true){
     const local = from.roomName === to.roomName;
     const maxRooms = local ? 1 : null;
     if( ignoreCreeps === false ){
         return findLocalPath(from, to, ignoreCreeps, maxRooms);
     } else {
-        const fromKey = global.posToString(from);
-        const toKey = local ? global.posToString(to) : to.roomName;
+        const fromKey = posToString(from);
+        const toKey = local ? posToString(to) : to.roomName;
         let partition = local ? 
             global.partition['roomPath'] : 
             global.partition['travelPath'];
