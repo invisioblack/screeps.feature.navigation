@@ -1,4 +1,6 @@
 
+const COST_MATRIX_VALIDITY = 10010;
+
 let mod = {};
 module.exports = mod;
 
@@ -7,55 +9,49 @@ mod.extend = function(){
         'costMatrix': {
             configurable: true,
             get: function () {
-                let tape = global.partition['matrices'] ? global.partition['matrices'].data : null;
-                if( tape == null ) {
-                    log('Missing costMatrices tape', {
-                        roomName: this.name, 
-                        severity: 'error', 
-                        scope: 'Memory'
-                    });
-                    return null;
-                } else {
-                    let tapeTime = tape[`${this.name}_time`];
-                    if( tapeTime != null && tapeTime > Game.time-COST_MATRIX_VALIDITY ){
-                        if( this.deserializedCostMatrix === undefined ) this.deserializedCostMatrix = PathFinder.CostMatrix.deserialize(tape[this.name]);
-                        return this.deserializedCostMatrix;
-                    }
-                    
-                    log('Calculating cost matrix', {
-                        roomName: this.name, 
-                        severity: 'verbose', 
-                        scope: 'PathFinding'
-                    });
+                let partition = global.partition['matrices'];
+                let data = partition.data;
+                const timeout = data[`${this.name}_time`];
 
-                    let costMatrix = new PathFinder.CostMatrix;
-                    let setCosts = structure => {
-                        if(structure.structureType == STRUCTURE_ROAD) {
-                            costMatrix.set(structure.pos.x, structure.pos.y, 1);
-                        } else if(structure.structureType !== STRUCTURE_RAMPART ) { //|| !structure.isPublic
-                            costMatrix.set(structure.pos.x, structure.pos.y, 0xFF);
-                        }
-                    };
-                    this.structures.all.forEach(setCosts);
-
-                    this.deserializedCostMatrix = costMatrix;
-                    tape[this.name] = costMatrix.serialize();
-                    tape[`${this.name}_time`] = Game.time;
-                    global.partition['matrices'].data = tape;
-                    return costMatrix;
+                if( timeout != null && timeout > Game.time ){
+                    if( this.deserializedCostMatrix === undefined ) this.deserializedCostMatrix = PathFinder.CostMatrix.deserialize(data[this.name]);
+                    return this.deserializedCostMatrix;
                 }
+                
+                log('Calculating cost matrix', {
+                    roomName: this.name, 
+                    severity: 'verbose', 
+                    scope: 'PathFinding'
+                });
+
+                let costMatrix = new PathFinder.CostMatrix;
+                const setCosts = structure => {
+                    if(structure.structureType == STRUCTURE_ROAD) {
+                        costMatrix.set(structure.pos.x, structure.pos.y, 1);
+                    } else if(structure.structureType !== STRUCTURE_RAMPART ) { //|| !structure.isPublic
+                        costMatrix.set(structure.pos.x, structure.pos.y, 0xFF);
+                    }
+                };
+                const structures = this.find(FIND_STRUCTURES);
+                structures.forEach(setCosts);
+
+                this.deserializedCostMatrix = costMatrix;
+                data[this.name] = costMatrix.serialize();
+                data[`${this.name}_time`] = Game.time + COST_MATRIX_VALIDITY;
+                partition.data = data;
+                
+                return costMatrix;
             }
         },
         'currentCostMatrix': {
             configurable: true,
             get: function () {
                 if ( this._currentCostMatrix === undefined ) {
-                    let costs = this.costMatrix;
+                    let matrix = this.costMatrix;
+                    let creeps = this.find(FIND_CREEPS);
                     // Avoid creeps in the room
-                    this.allCreeps.forEach(function(creep) {
-                        costs.set(creep.pos.x, creep.pos.y, 0xff);
-                    });
-                    this._currentCostMatrix = costs;
+                    creeps.forEach( creep => matrix.set(creep.pos.x, creep.pos.y, 0xff) );
+                    this._currentCostMatrix = matrix;
                 }
                 return this._currentCostMatrix;
             }
@@ -157,163 +153,4 @@ mod.getDirection = function(fromPos, toPos){
             if(dx < 0 && dy < 0) return global.TOP_LEFT;
         }
     }
-};
-
-let _findPath = function(from, to, ignoreCreeps = true, maxRooms = null){
-    let path = from.findPathTo(to, {
-        serialize: true,
-        ignoreCreeps, 
-        maxRooms
-    });
-    if( path && path.length > 4 ){
-        path = path.substr(4);
-        return path;
-    }
-    return null;
-}
-mod.findRoute = function(fromRoomName, toRoomName, checkOwner = true, preferHighway = true){
-    if (fromRoomName === toRoomName)  return [];
-
-    return Game.map.findRoute(fromRoomName, toRoomName, {
-        routeCallback(roomName) {
-            if( roomName === toRoomName ) return 1;
-            if( BLOCKED_ROOMS.includes(roomName) ) return Infinity;
-
-            let isMyOrNeutralRoom = false;
-            if( checkOwner ){
-                let room = Game.rooms[roomName];
-                isMyOrNeutralRoom = (room != null) && (room.my || room.myReservation || room.owner === null ); // allows foreign reserved rooms (if visible)
-            }
-
-            if (isMyOrNeutralRoom)
-                return 1;
-            else if (preferHighway && Room.isHighwayRoom(roomName))
-                return 3;
-            else if( Game.map.isRoomAvailable(roomName))
-                return (checkOwner || preferHighway) ? 11 : 1;
-            return Infinity;
-        }
-    });
-};
-mod.getPath = function(from, to, ignoreCreeps = true){
-    let routeRange = global.routeRange(from.roomName, to.roomName);
-    const local = routeRange === 0;
-    let maxRooms = local ? 1 : null;
-    if( !ignoreCreeps ){
-        return _findPath(from, to, ignoreCreeps, maxRooms);
-    } else/* if( local ){
-        // use Room search
-        return _findPath(from, to, ignoreCreeps, maxRooms);
-    } else */
-    {
-        let data;
-        if( local ) 
-            data = global.partition['roomPath'] ? global.partition['roomPath'].data : null;
-        else
-            data = global.partition['travelPath'] ? global.partition['travelPath'].data : null;
-        if( data == null ) {
-            return _findPath(from, to, ignoreCreeps, maxRooms);
-        } else {
-            // get stored path
-            const fromKey = global.posToString(from);
-            const toKey = local ? global.posToString(to) : to.roomName;
-            if(data[fromKey] !== undefined) {
-                let cachedPath = data[fromKey][toKey];
-                if( cachedPath != null){
-                    if( cachedPath.p == null || cachedPath.t < Game.time ){
-                        delete data[fromKey][toKey];
-                    } else 
-                        return data[fromKey][toKey].p;
-                }
-            }
-
-            let path = null;
-            // calculate new path
-            if(local){
-                path = _findPath(from, to, ignoreCreeps, maxRooms);
-            }
-            else /*if( routeRange === 1 ){
-                path = _findPath(from, to);
-            } else */
-            {
-                let route = local ? [from.roomName] : Room.findRoute(from.roomName, to.roomName, true, routeRange > 4).map(r => r.room);
-                maxRooms = local ? 1 : route.length+1;
-                let tape = global.partition['matrices'].data;
-                let ret = PathFinder.search(
-                    from, 
-                    {
-                        pos: to,
-                        range: 1
-                    }, 
-                    {
-                        plainCost: 2,
-                        swampCost: 10,
-                        heuristicWeight: 1.5,
-                        maxRooms,
-                        maxOps: 4000,
-
-                        roomCallback: function(roomName) {
-                            // Invalid (not on route)
-                            if( roomName !== from.roomName && !route.includes(roomName) ) 
-                                return false;
-                            let room = Game.rooms[roomName];
-                            // Visibility -> use cached deserialized cost matrix
-                            if( room != null ) 
-                                return room.costMatrix;
-                            // Deserialize cost matrix from memory
-                            if( tape[roomName] != null ) 
-                                return PathFinder.CostMatrix.deserialize(tape[roomName]);
-                            // default
-                            return;
-                        }
-                    }
-                );
-                path = global.serializePath(ret, from, to, true);
-            }
-
-            // save new path
-            if( data[fromKey] === undefined) data[fromKey] = {};
-            if( data[fromKey][toKey] === undefined) data[fromKey][toKey] = {};
-            data[fromKey][toKey].p = path;
-            if( local ){
-                data[fromKey][toKey].t = Game.time + ROOMPATH_RECALCULATION; // timeout
-                global.partition['roomPath'].data = data;
-            }
-            else{
-                data[fromKey][toKey].t = Game.time + TRAVELPATH_RECALCULATION; // timeout
-                global.partition['travelPath'].data = data;
-            }
-            return path;
-        }
-    }
-};
-
-let pathInversion = {
-    '1':'5',
-    '2':'6',
-    '3':'7',
-    '4':'8',
-    '5':'1',
-    '6':'2',
-    '7':'3',
-    '8':'4',
-};
-// For use with PathFinder Results
-mod.serializePath = function(result, fromPos, toPos, trimEnd = false){
-    let path = '';
-    //let reversePath = '';
-    let lastPos = fromPos;
-    for(let i=0; i<result.path.length; i++) {
-        let pos = result.path[i];
-        let dir = global.getDirection(lastPos, pos);
-        if( dir !== null ){
-            path += dir.toString();
-            //reversePath = pathInversion[dir] + reversePath;
-        }
-        lastPos = pos;
-        if( trimEnd && pos.roomName === toPos.roomName ) 
-            return path;
-    }
-
-    return path;
 };
