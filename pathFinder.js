@@ -2,7 +2,6 @@
 let mod = {};
 module.exports = mod;
 
-// copy locally to have at hand during later calls (from different context)
 const ROOMPATH_VALILDITY = context.settings.ROOMPATH_VALILDITY;
 const TRAVELPATH_VALILDITY = context.settings.TRAVELPATH_VALILDITY;
 const BLOCKED_ROOMS = context.settings.BLOCKED_ROOMS;
